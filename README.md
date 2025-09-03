@@ -1,2 +1,2 @@
 # Physics
-rust coding practive
+rust coding practice

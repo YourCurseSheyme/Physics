@@ -3,7 +3,7 @@
 use ode_solvers::*;
 use plotters::prelude::*;
 
-const ASSETS_PATH: &str = "/home/sheyme/workspace/physics/plots/plot.png";
+const ASSETS_PATH: &str = "plots/plot.png";
 
 #[derive(Debug, Clone, Copy)]
 pub enum DragModel {
