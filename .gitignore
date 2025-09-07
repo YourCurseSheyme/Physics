@@ -1,2 +1,5 @@
+# Build folder
 /target
-/plots
+
+# Assets content
+/plots/*
