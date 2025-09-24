@@ -702,9 +702,11 @@ dependencies = [
 name = "physics"
 version = "0.1.0"
 dependencies = [
+ "approx",
  "nalgebra 0.34.0",
  "ode_solvers",
  "plotters",
+ "thiserror",
 ]
 
 [[package]]

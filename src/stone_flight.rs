@@ -68,11 +68,10 @@ fn clamp_to_ground(mut xy: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
     if y_last < 0.0 && y_prev >= 0.0 {
       xy[n - 1] = hit_ground_interpolate(xy[n - 2], xy[n - 1]);
     } else if y_last < 0.0 {
-      // если обе последние ниже нуля, ищем последнее пересечение
       for i in (1..n).rev() {
         if xy[i - 1].1 >= 0.0 && xy[i].1 < 0.0 {
           let h = hit_ground_interpolate(xy[i - 1], xy[i]);
-          xy.truncate(i); // обрежем всё после пересечения
+          xy.truncate(i);
           xy.push(h);
           break;
         }
@@ -108,7 +107,6 @@ impl StoneFlightSimulator {
     let v0x = self.initial_velocity * angle_rad.cos();
     let v0y = self.initial_velocity * angle_rad.sin();
 
-    // оценим разумный t_end: без сопротивления T ≈ 2 v0 sinθ / g
     let t_est = if self.params.g > 0.0 {
       (2.0 * self.initial_velocity * angle_rad.sin() / self.params.g).max(1.0)
     } else {

@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+approx = "0.5.1"
 nalgebra = "0.34.0"
 ode_solvers = "0.6.1"
 plotters = "0.3.7"
+thiserror = "2.0.16"
