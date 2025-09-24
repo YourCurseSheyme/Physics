@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+nalgebra = "0.34.0"
 ode_solvers = "0.6.1"
 plotters = "0.3.7"
