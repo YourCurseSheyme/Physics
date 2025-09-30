@@ -1,4 +1,4 @@
-//! First task — refactored
+//! First task
 
 use ode_solvers::*;
 use plotters::prelude::*;
@@ -103,7 +103,12 @@ impl StoneFlightSimulator {
   }
 
   pub fn calculate_trajectory(&self) -> Result<Vec<(f64, f64)>, String> {
-    let angle_rad = self.initial_angle_deg.to_radians();
+    if self.initial_velocity.abs() < 1.0e-12 {
+      vec![(0.0, 0.0)];
+    }
+
+    let angle_deg = self.initial_angle_deg.rem_euclid(360.0);
+    let angle_rad = angle_deg.to_radians();
     let v0x = self.initial_velocity * angle_rad.cos();
     let v0y = self.initial_velocity * angle_rad.sin();
 
@@ -137,8 +142,13 @@ impl StoneFlightSimulator {
   }
 
   pub fn calculate_trajectory_by_curvature(&self) -> Result<Vec<(f64, f64)>, String> {
+    if self.initial_velocity.abs() < 1.0e-12 {
+      vec![(0.0, 0.0)];
+    }
+
     let mut trajectory = Vec::new();
-    let angle_rad = self.initial_angle_deg.to_radians();
+    let angle_deg = self.initial_angle_deg.rem_euclid(360.0);
+    let angle_rad = angle_deg.to_radians();
     let mut pos = Vector2::new(0.0, 0.0);
     let mut vel = Vector2::new(
       self.initial_velocity * angle_rad.cos(),
@@ -214,6 +224,126 @@ impl StoneFlightSimulator {
 
     Ok(trajectory)
   }
+
+  pub fn calculate_trajectory_analytic(&self, dt: f64) -> Result<Vec<(f64, f64)>, String> {
+    if self.initial_velocity.abs() < 1.0e-12 {
+      vec![(0.0, 0.0)];
+    }
+
+    match self.params.drag_model {
+      DragModel::NoDrag => {
+        let samples = (1.0f64.max((self.initial_velocity / self.params.g).abs() / dt) as usize).max(100);
+        self.calculate_trajectory_analytic_no_drag(samples)
+      }
+      DragModel::Frontal(_) => {
+        self.calculate_trajectory()
+      }
+      DragModel::Viscous(k) => {
+        let m = self.params.mass;
+        let g = self.params.g;
+        let tau = if k > 0.0 {
+          m / k
+        } else {
+          f64::INFINITY
+        };
+        if !tau.is_finite() || tau <= 0.0 {
+          let samples = (1.0_f64.max( (self.initial_velocity / self.params.g).abs() / dt ) as usize).max(100);
+          return self.calculate_trajectory_analytic_no_drag(samples);
+        }
+
+        let angle = self.initial_angle_deg.rem_euclid(360.0).to_radians();
+        let v0 = self.initial_velocity;
+        let v0x = v0 * angle.cos();
+        let v0y = v0 * angle.sin();
+        if v0y <= 0.0 {
+          vec![(0.0, 0.0)];
+        }
+
+        let y_of = |t: f64| -> f64 {
+          let e = (-t / tau).exp();
+          (v0y + g * tau) * tau * (1.0 - e) - g * tau * t
+        };
+
+        let mut t_lo = 0.0f64;
+        let mut t_hi = (2.0 * v0y / g).max(1.0);
+        for _ in 0..60 {
+          if y_of(t_hi) <= 0.0 {
+            break;
+          }
+          t_hi *= 2.0;
+        }
+        if y_of(t_hi) > 0.0 {
+          t_hi = t_hi + 10.0 * tau;
+        }
+        for _ in 0..60 {
+          let mid = 0.5 * (t_hi + t_lo);
+          if y_of(mid) > 0.0 {
+            t_lo = mid;
+          } else {
+            t_hi = mid;
+          }
+        }
+        let t_flight = t_hi;
+
+        let n_steps = ((t_flight / dt).ceil() as usize).max(2);
+        let mut traj = Vec::with_capacity(n_steps + 1);
+        for i in 0..n_steps {
+          let t = (i as f64) * dt;
+          let t = if t > t_flight {
+            t_flight
+          } else {
+            t
+          };
+          let e = (-t / tau).exp();
+          let x = v0x * tau * (1.0 - e);
+          let y = (v0y + g * tau) * tau * (1.0 - e) - g * tau * t;
+          let y_plot = if (t_flight - t).abs() < 1.0e-9 {
+            0.0
+          } else {
+            y.max(0.0)
+          };
+          traj.push((x, y_plot));
+          if t >= t_flight {
+            break;
+          }
+        }
+        Ok(traj)
+      }
+    }
+
+  }
+
+  fn calculate_trajectory_analytic_no_drag(&self, samples: usize) -> Result<Vec<(f64, f64)>, String> {
+    if self.initial_velocity.abs() < 1.0e-12 || self.params.g <= 0.0 || samples < 2 {
+      vec![(0.0, 0.0)];
+    }
+
+    let angle = self.initial_angle_deg.rem_euclid(360.0).to_radians();
+    let v0 = self.initial_velocity;
+    let v0x = v0 * angle.cos();
+    let v0y = v0 * angle.sin();
+    if v0y <= 0.0 {
+      vec![(0.0, 0.0)];
+    }
+    let g = self.params.g;
+    let t_flight = 2.0 * v0y / g;
+    let n = samples.max(2);
+    let dt = t_flight / (n as f64 - 1.0);
+
+    let mut traj = Vec::with_capacity(n);
+    for i in 0..n {
+      let t = (i as f64) * dt;
+      let x = v0x * t;
+      let y = v0y * t - 0.5 * g * t * t;
+      let y_clamped = if i + 1 == n {
+        0.0
+      } else {
+        y.max(0.0)
+      };
+      traj.push((x, y_clamped));
+    }
+    Ok(traj)
+  }
 }
 
 fn test_no_drag(initial_velocity: f64, initial_angle_deg: f64) -> Result<Vec<(f64, f64)>, String> {
@@ -265,6 +395,20 @@ fn test_curvature_method(
   simulator.calculate_trajectory_by_curvature()
 }
 
+fn test_analytic_method(
+  initial_velocity: f64,
+  initial_angle_deg: f64,
+  drag_model: DragModel,
+) -> Result<Vec<(f64, f64)>, String> {
+  let params = SimulationParameters {
+    mass: 1.0,
+    g: 9.81,
+    drag_model,
+  };
+  let simulator = StoneFlightSimulator::new(initial_velocity, initial_angle_deg, params);
+  simulator.calculate_trajectory_analytic(0.01)
+}
+
 pub fn run_stone_tests() -> Result<(), Box<dyn std::error::Error>> {
   let initial_velocity = 50.0;
   let initial_angle_deg = 45.0;
@@ -286,35 +430,42 @@ pub fn run_stone_tests() -> Result<(), Box<dyn std::error::Error>> {
            trajectory_frontal.last().map(|p| p.0).unwrap_or(0.0));
   println!("+---------------");
 
-  let trajectory_curvature = test_curvature_method(initial_velocity, initial_angle_deg)?;
-  println!("Curvature (no drag): range ~ {:.2} m",
-           trajectory_curvature.last().map(|p| p.0).unwrap_or(0.0));
+  // let trajectory_curvature = test_curvature_method(initial_velocity, initial_angle_deg)?;
+  // println!("Curvature (no drag): range ~ {:.2} m",
+  //          trajectory_curvature.last().map(|p| p.0).unwrap_or(0.0));
+  // println!("+---------------");
+
+  // let trajectory_analytic = test_analytic_method(initial_velocity, initial_angle_deg, DragModel::NoDrag)?;
+  // println!("Analytic (no drag): range ~ {:.2} m",
+  //   trajectory_analytic.last().map(|p| p.0).unwrap_or(0.0));
+  // println!("+---------------");
+
+  let trajectory_analytic_viscous = test_analytic_method(initial_velocity, initial_angle_deg, DragModel::Viscous(0.1))?;
+  println!("Analytic (no drag): range ~ {:.2} m",
+    trajectory_analytic_viscous.last().map(|p| p.0).unwrap_or(0.0));
   println!("+---------------");
 
   let all_series: [&[(f64, f64)]; 4] = [
     &trajectory_no_drag,
     &trajectory_viscous,
     &trajectory_frontal,
-    &trajectory_curvature,
+    // &trajectory_curvature,
+    // &trajectory_analytic,
+    &trajectory_analytic_viscous,
   ];
 
-  let mut max_x = 0.0f64;
-  let mut max_y = 0.0f64;
-  for ser in all_series.iter() {
-    for (x, y) in (*ser).iter() {
-      if *x > max_x {
-        max_x = *x;
-      }
-      if *y > max_y {
-        max_y = *y;
-      }
-    }
-  }
-  if max_x <= 0.0 || max_y <= 0.0 {
-    return Err("nothing to plot".into());
-  }
-  max_x *= 1.1;
-  max_y *= 1.1;
+  let (min_x, max_x) = all_series
+      .iter()
+      .flat_map(|tr| tr.iter().map(|p| p.0))
+      .fold((f64::INFINITY, f64::NEG_INFINITY), |(mn, mx), x| (mn.min(x), mx.max(x)));
+
+  let max_y = all_series
+      .iter()
+      .flat_map(|tr| tr.iter().map(|p| p.1))
+      .fold(0.0, f64::max);
+
+  let dx = (max_x - min_x).abs().max(1.0) * 0.45;
+  let dy = max_y.abs().max(1.0) * 0.1;
 
   let root_area = BitMapBackend::new(ASSETS_PATH, (800, 600)).into_drawing_area();
   root_area.fill(&WHITE)?;
@@ -324,7 +475,7 @@ pub fn run_stone_tests() -> Result<(), Box<dyn std::error::Error>> {
     .margin(10)
     .x_label_area_size(40)
     .y_label_area_size(40)
-    .build_cartesian_2d(0.0..max_x, 0.0..max_y)?;
+    .build_cartesian_2d((min_x - dx)..(max_x + dx), 0.0..(max_y +dy))?;
 
   chart
     .configure_mesh()
@@ -349,12 +500,14 @@ pub fn run_stone_tests() -> Result<(), Box<dyn std::error::Error>> {
 
   chart
     .draw_series(PointSeries::of_element(
-      trajectory_curvature,
-      2,
+      // trajectory_curvature,
+      // trajectory_analytic,
+      trajectory_analytic_viscous,
+      0.1,
       &MAGENTA,
       &|c, s, st| EmptyElement::at(c) + Circle::new((0, 0), s, st.filled()),
     ))?
-    .label("Curvature method")
+    .label("Analytics method (viscous)")
     .legend(|(x, y)| Circle::new((x + 10, y), 3, MAGENTA.filled()));
 
   chart
